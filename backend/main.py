@@ -8,6 +8,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.agents.extraction_agent import run_extraction_agent
+from backend.agents.graph_agent import run_graph_agent, get_store
+from backend.models.schemas import Triple
 
 load_dotenv()
 
@@ -43,8 +45,22 @@ async def ingest_text(request: TextIngestRequest):
         )
 
     async def event_generator():
+        triples = []
+
         async for event in run_extraction_agent(request.text):
             yield _sse_line(event)
+            if event.get("type") == "triples":
+                triples = [Triple(**t) for t in event["triples"]]
+
+        async for event in run_graph_agent(triples):
+            yield _sse_line(event)
+
         yield _sse_line({"type": "done"})
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/graph")
+async def get_graph():
+    store = get_store()
+    return store.get_graph()
