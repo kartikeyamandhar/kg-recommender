@@ -1,30 +1,41 @@
-import io
+import asyncio
 import os
 import tempfile
 from typing import AsyncGenerator
 
 from backend.models.schemas import AgentStep
 
-# Whisper is imported lazily to avoid slow startup when not needed
 _whisper_model = None
 
 
 def _get_whisper():
     global _whisper_model
     if _whisper_model is None:
+        import torch
+        torch.set_num_threads(1)
         import whisper
         _whisper_model = whisper.load_model("base")
     return _whisper_model
 
 
+def _transcribe_sync(audio_bytes: bytes, suffix: str) -> str:
+    import torch
+    torch.set_num_threads(1)
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+    try:
+        model = _get_whisper()
+        result = model.transcribe(tmp_path, fp16=False)
+        return result["text"].strip()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
 async def transcribe_audio(audio_bytes: bytes, filename: str = "audio.mp3") -> AsyncGenerator[dict, None]:
-    """
-    Async generator that:
-    1. Emits a step event before transcription
-    2. Transcribes the audio using local Whisper base model
-    3. Emits a step event after transcription
-    4. Yields {"type": "transcription", "text": <transcribed text>}
-    """
     step_counter = 0
 
     step_counter += 1
@@ -37,18 +48,22 @@ async def transcribe_audio(audio_bytes: bytes, filename: str = "audio.mp3") -> A
         ).model_dump(),
     }
 
-    # Write to temp file — Whisper needs a file path
     suffix = os.path.splitext(filename)[-1] or ".mp3"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(audio_bytes)
-        tmp_path = tmp.name
 
     try:
-        model = _get_whisper()
-        result = model.transcribe(tmp_path)
-        text = result["text"].strip()
-    finally:
-        os.unlink(tmp_path)
+        loop = asyncio.get_event_loop()
+        text = await loop.run_in_executor(None, _transcribe_sync, audio_bytes, suffix)
+    except Exception as e:
+        yield {
+            "type": "step",
+            "step": AgentStep(
+                step=step_counter + 1,
+                agent="extraction",
+                message=f"Transcription failed: {e}",
+            ).model_dump(),
+        }
+        yield {"type": "transcription", "text": ""}
+        return
 
     step_counter += 1
     yield {

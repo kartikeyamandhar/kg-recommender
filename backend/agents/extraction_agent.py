@@ -11,15 +11,17 @@ from backend.ingest.text_parser import chunk_text
 load_dotenv()
 
 EXTRACTION_PROMPT = """You are a knowledge graph extraction engine.
-Extract all named entities and their relationships from the text below.
+Extract named entities and their relationships from the text below.
+Only extract NAMED entities: real people, specific books, films, places, organizations, products, and technologies.
+Do NOT extract: adjectives, descriptors, generic nouns, or abstract concepts like "nutty", "experiences", "food".
 Return ONLY a JSON array of objects. No preamble, no explanation, no markdown.
 Each object must have: head (string), relation (string), tail (string), confidence (float 0-1).
-Use concise snake_case for relation strings (e.g. directed_by, located_in, authored_by).
+Use concise snake_case for relation strings (e.g. directed_by, located_in, authored_by, similar_to).
 
 TEXT:
 {text}"""
 
-MODEL = "claude-haiku-3-5-20241022"
+MODEL = "claude-haiku-4-5-20251001"
 
 
 def _get_client() -> anthropic.Anthropic:
@@ -69,7 +71,7 @@ async def run_extraction_agent(text: str) -> AsyncGenerator[dict, None]:
         message = client.messages.create(
             model=MODEL,
             max_tokens=2048,
-            system="You are a knowledge graph extraction engine. Output only valid JSON.",
+            system="You are a knowledge graph extraction engine. Output only valid JSON. Only extract real named entities.",
             messages=[{"role": "user", "content": EXTRACTION_PROMPT.format(text=chunk)}],
         )
         raw_response = message.content[0].text

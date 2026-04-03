@@ -261,3 +261,43 @@ async def recommend(request: RecommendRequest):
         yield _sse_line({"type": "done"})
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# Chat
+# ---------------------------------------------------------------------------
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list = []
+
+
+@app.post("/chat")
+async def chat(request: ChatRequest):
+    if not request.message.strip():
+        raise HTTPException(status_code=422, detail="message must not be empty")
+
+    from backend.agents.chat_agent import run_chat_agent
+
+    async def event_generator():
+        try:
+            async for chunk in run_chat_agent(get_store(), request.message, request.history):
+                yield _sse_line({"type": "chunk", "text": chunk})
+        except Exception as e:
+            yield _sse_line({"type": "error", "message": str(e)})
+        yield _sse_line({"type": "done"})
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.delete("/graph")
+async def reset_graph():
+    import sqlite3
+    store = get_store()
+    store.graph.clear()
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("DELETE FROM edges")
+        conn.execute("DELETE FROM nodes")
+        conn.commit()
+    global _embed_store
+    _embed_store = None
+    return {"status": "reset"}

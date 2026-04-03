@@ -14,7 +14,7 @@ load_dotenv()
 PATH_WEIGHT = 0.6
 EMBED_WEIGHT = 0.4
 MIN_CONFIDENCE = 0.5
-MODEL = "claude-haiku-3-5-20241022"
+MODEL = "claude-haiku-4-5-20251001"
 
 
 def _get_client() -> anthropic.Anthropic:
@@ -63,18 +63,19 @@ def _bfs_scores(
 def _generate_explanation(client: anthropic.Anthropic, seed_label: str, target_label: str, path: List[str]) -> str:
     path_str = " → ".join(path)
     prompt = (
-        f"In one sentence, explain why '{target_label}' is related to '{seed_label}' "
-        f"via the path: {path_str}"
+        f"In one sentence, explain the connection between '{seed_label}' and '{target_label}'. "
+        f"They are linked via: {path_str}. "
+        f"Be specific and factual. If you don't know the connection, say so briefly."
     )
     try:
         msg = client.messages.create(
             model=MODEL,
-            max_tokens=100,
+            max_tokens=80,
             messages=[{"role": "user", "content": prompt}],
         )
         return msg.content[0].text.strip()
     except Exception:
-        return f"Connected to {seed_label} via {path_str}."
+        return f"Related to {seed_label} via {path_str}."
 
 
 async def run_recommendation_agent(
